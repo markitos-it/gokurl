@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image/color"
 	"io"
+	"log"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -56,6 +57,7 @@ var (
 	colorTextBlack = color.RGBA{R: 18, G: 18, B: 18, A: 255}
 	colorBorderRed = color.RGBA{R: 220, G: 53, B: 69, A: 255}
 )
+var methodFormCache = make(map[string]map[string]string)
 
 type ArtisanLightTheme struct{}
 
@@ -178,7 +180,12 @@ func main() {
 
 		payloadItems := []string{}
 		for fieldName, entry := range formFields {
-			payloadItems = append(payloadItems, fmt.Sprintf(`"%s": "%s"`, fieldName, entry.Text))
+			if strings.HasSuffix(fieldName, "_ids") {
+				ids := strings.Split(entry.Text, ",")
+				payloadItems = append(payloadItems, fmt.Sprintf(`"%s": ["%s"]`, fieldName, strings.Join(ids, `","`)))
+			} else {
+				payloadItems = append(payloadItems, fmt.Sprintf(`"%s": "%s"`, fieldName, entry.Text))
+			}
 		}
 
 		jsonPayload := "{" + strings.Join(payloadItems, ",") + "}"
@@ -230,7 +237,12 @@ func main() {
 		address := serverAddressInput.Text
 		payloadItems := []string{}
 		for fieldName, entry := range formFields {
-			payloadItems = append(payloadItems, fmt.Sprintf(`"%s": "%s"`, fieldName, entry.Text))
+			if strings.HasSuffix(fieldName, "_ids") {
+				ids := strings.Split(entry.Text, ",")
+				payloadItems = append(payloadItems, fmt.Sprintf(`"%s": ["%s"]`, fieldName, strings.Join(ids, `","`)))
+			} else {
+				payloadItems = append(payloadItems, fmt.Sprintf(`"%s": "%s"`, fieldName, entry.Text))
+			}
 		}
 
 		jsonPayload := "{" + strings.Join(payloadItems, ",") + "}"
@@ -300,7 +312,9 @@ func main() {
 				return
 			}
 			defer conn.Close()
-
+			log.Println("-------------------------------")
+			log.Println("jsonPayload", jsonPayload)
+			log.Println("-------------------------------")
 			dynamicRequest := dynamicpb.NewMessage(targetMethod.Input())
 			err = protojson.Unmarshal([]byte(jsonPayload), dynamicRequest)
 			if err != nil {
@@ -471,10 +485,21 @@ func main() {
 
 		if existe && len(reqMessage.Fields) > 0 {
 			form := widget.NewForm()
+			if methodFormCache[selectedMethod.Name] == nil {
+				methodFormCache[selectedMethod.Name] = make(map[string]string)
+			}
 			for _, field := range reqMessage.Fields {
 				input := widget.NewEntry()
 				input.SetPlaceHolder(field.Type)
+				if cachedValue, ok := methodFormCache[selectedMethod.Name][field.Name]; ok {
+					input.SetText(cachedValue)
+				}
+				currentFieldName := field.Name
+				input.OnChanged = func(text string) {
+					methodFormCache[selectedMethod.Name][currentFieldName] = text
+				}
 				form.Append(field.Name, input)
+
 				formFields[field.Name] = input
 			}
 			formContainer.Add(form)
