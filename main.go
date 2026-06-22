@@ -93,7 +93,7 @@ func main() {
 
 	w := myApp.NewWindow("gOKurl - gRPC Artisan Client")
 	w.Resize(fyne.Size{Width: 1024, Height: 850})
-	w.SetFixedSize(true)
+	w.SetFixedSize(false)
 
 	if err := os.MkdirAll(assetsDir, os.ModePerm); err != nil {
 		fmt.Println("Error creando directorio assets:", err)
@@ -118,12 +118,12 @@ func main() {
 		container.NewPadded(serverAddressInput),
 	)
 
-	methodNameLabel := widget.NewLabelWithStyle("Selecciona un método", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	methodNameLabel := widget.NewLabelWithStyle("Select a method", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	formContainer := container.NewVBox()
 
 	requestOutput := widget.NewMultiLineEntry()
 	requestOutput.TextStyle = fyne.TextStyle{Monospace: true}
-	requestOutput.SetText("El payload JSON saliente se estructurará aquí...")
+	requestOutput.SetText("The outgoing JSON payload will be structured here...")
 	requestOutput.Disable()
 
 	reqTerminalBg := canvas.NewRectangle(colorConsoleBg)
@@ -132,7 +132,8 @@ func main() {
 
 	responseOutput := widget.NewMultiLineEntry()
 	responseOutput.TextStyle = fyne.TextStyle{Monospace: true}
-	responseOutput.SetText("La respuesta del servidor remoto aparecerá aquí...")
+	responseOutput.SetText("The remote server's response will appear here...")
+	responseOutput.Disable()
 
 	resTerminalBg := canvas.NewRectangle(colorConsoleBg)
 	resScroll := container.NewScroll(container.NewStack(resTerminalBg, container.NewPadded(responseOutput)))
@@ -141,19 +142,25 @@ func main() {
 	loaderBar := widget.NewProgressBarInfinite()
 	loaderBar.Hide()
 
-	sendBtn := widget.NewButtonWithIcon("Enviar Request", theme.ConfirmIcon(), nil)
+	sendBtn := widget.NewButtonWithIcon("Send Request", theme.ConfirmIcon(), nil)
 	sendBtn.Importance = widget.HighImportance
 	sendBtn.Disable()
+
+	grpcurlBtn := widget.NewButtonWithIcon("", theme.ComputerIcon(), nil)
+	grpcurlBtn.Importance = widget.LowImportance
+	grpcurlBtn.Disable()
 
 	validateForm := func() {
 		address := strings.TrimSpace(serverAddressInput.Text)
 		if address == "" {
 			inputBorderBg.FillColor = colorBorderRed
 			sendBtn.Disable()
+			grpcurlBtn.Disable()
 		} else {
 			inputBorderBg.FillColor = color.Transparent
 			if methodSelected {
 				sendBtn.Enable()
+				grpcurlBtn.Enable()
 			}
 		}
 		inputBorderBg.Refresh()
@@ -163,8 +170,60 @@ func main() {
 		validateForm()
 	}
 
+	grpcurlBtn.OnTapped = func() {
+		address := serverAddressInput.Text
+		if address == "" {
+			address = "localhost:50051"
+		}
+
+		payloadItems := []string{}
+		for fieldName, entry := range formFields {
+			payloadItems = append(payloadItems, fmt.Sprintf(`"%s": "%s"`, fieldName, entry.Text))
+		}
+
+		jsonPayload := "{" + strings.Join(payloadItems, ",") + "}"
+		methodSymbol := selectedMethod.Name
+
+		cmd := fmt.Sprintf("grpcurl -plaintext -d '%s' %s %s", jsonPayload, address, methodSymbol)
+
+		cmdEntry := widget.NewMultiLineEntry()
+		cmdEntry.SetText(cmd)
+		cmdEntry.Wrapping = fyne.TextWrapWord
+		cmdEntry.Disable() // Asegura que el área de texto sea estrictamente Read-Only
+
+		var d dialog.Dialog
+		closeBtn := widget.NewButtonWithIcon("", theme.CancelIcon(), func() {
+			d.Hide()
+		})
+		closeBtn.Importance = widget.LowImportance
+
+		copyBtn := widget.NewButtonWithIcon("Copy to Clipboard", theme.ContentCopyIcon(), func() {
+			w.Clipboard().SetContent(cmd)
+		})
+
+		// Envolvemos el Entry en un Scroll y le asignamos un tamaño mínimo explícito
+		cmdScroll := container.NewScroll(cmdEntry)
+		cmdScroll.SetMinSize(fyne.NewSize(560, 260))
+
+		// Estructura de layout para asegurar la correcta distribución del espacio expandido
+		title := widget.NewLabelWithStyle("Generated grpcurl command:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+		topBar := container.NewBorder(nil, nil, nil, closeBtn, title)
+		content := container.NewBorder( // No dismiss button text
+			topBar,
+			copyBtn,
+			nil,
+			nil,
+			cmdScroll,
+		)
+
+		d = dialog.NewCustomWithoutButtons("Export to grpcurl", content, w)
+		d.Resize(fyne.NewSize(600, 420))
+		d.Show()
+	}
+
 	sendBtn.OnTapped = func() {
 		sendBtn.Disable()
+		grpcurlBtn.Disable()
 		loaderBar.Show()
 		loaderBar.Start()
 
@@ -178,14 +237,16 @@ func main() {
 		methodSymbol := selectedMethod.Name
 
 		var reqLog strings.Builder
-		reqLog.WriteString(fmt.Sprintf("🌍 [TARGET]: %s\n", address))
-		reqLog.WriteString(fmt.Sprintf("📬 [METHOD]: %s\n", methodSymbol))
-		reqLog.WriteString(fmt.Sprintf("📦 [JSON]:   %s", jsonPayload))
+		fmt.Fprintf(&reqLog, "🌍 [TARGET]: %s\n", address)
+		fmt.Fprintf(&reqLog, "📬 [METHOD]: %s\n", methodSymbol)
+		fmt.Fprintf(&reqLog, "📦 [JSON]:   %s", jsonPayload)
 		requestOutput.SetText(reqLog.String())
 
 		responseOutput.SetText("⌛ Connecting via native Go gRPC channel...")
 
 		go func() {
+			time.Sleep(200 * time.Millisecond)
+
 			defer func() {
 				loaderBar.Stop()
 				loaderBar.Hide()
@@ -197,7 +258,7 @@ func main() {
 
 			compiler := protocompile.Compiler{
 				Resolver: protocompile.WithStandardImports(&protocompile.SourceResolver{
-					ImportPaths: []string{importPath},
+					ImportPaths: []string{importPath, assetsDir},
 				}),
 			}
 
@@ -256,17 +317,17 @@ func main() {
 			var logResult strings.Builder
 			if err != nil {
 				resTerminalBg.FillColor = colorConsoleBg
-				resTerminalBg.Refresh()
 				logResult.WriteString("❌ [gRPC SERVER ERROR]:\n")
 				logResult.WriteString(err.Error())
+				resTerminalBg.Refresh()
 			} else {
 				logResult.WriteString("🟢 [RESPONSE JSON]:\n")
 
 				jsonBytes, jsonErr := protojson.Marshal(dynamicResponse)
 				if jsonErr != nil {
 					resTerminalBg.FillColor = colorConsoleBg
-					resTerminalBg.Refresh()
 					logResult.WriteString(fmt.Sprintf("%v\n", dynamicResponse.String()))
+					resTerminalBg.Refresh()
 				} else {
 					prettyJSON := formatAndNormalizePayloads(jsonBytes)
 					logResult.WriteString(prettyJSON)
@@ -281,7 +342,6 @@ func main() {
 					resTerminalBg.Refresh()
 				}
 			}
-
 			responseOutput.SetText(logResult.String())
 		}()
 	}
@@ -375,22 +435,22 @@ func main() {
 		fyne.NewMenuItem("Help Documentation", func() {
 			dialog.ShowInformation(
 				"gOKurl Help",
-				"1. Carga un archivo .proto desde el menú File o selecciona uno de Assets.\n"+
-					"2. Elige el método gRPC de la lista superior del sidebar.\n"+
-					"3. Rellena la dirección del servidor y los parámetros generados automáticamente.\n"+
-					"4. Ejecuta el Request para inspeccionar los resultados.",
+				"1. Load a .proto file from the File menu or select one from Assets.\n"+
+					"2. Choose the gRPC method from the top list in the sidebar.\n"+
+					"3. Fill in the server address and the automatically generated parameters.\n"+
+					"4. Execute the Request to inspect the results.",
 				w,
 			)
 		}),
 		fyne.NewMenuItem("About", func() {
 			dialog.ShowCustom(
 				"About gOKurl",
-				"Cerrar",
+				"Close",
 				container.NewVBox(
-					widget.NewLabelWithStyle("gOKurl - gRPC Testing Client", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+					widget.NewLabelWithStyle("gRPC Testing Client", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 					widget.NewLabelWithStyle("Version 1.4.0", fyne.TextAlignCenter, fyne.TextStyle{Italic: true}),
 					widget.NewSeparator(),
-					widget.NewLabel("Diseño claro con sidebar gris y cajas de texto de alto contraste."),
+					widget.NewLabel("Clean design with gray sidebar and high-contrast text boxes."),
 				),
 				w,
 			)
@@ -420,7 +480,7 @@ func main() {
 			formContainer.Add(form)
 			methodSelected = true
 		} else {
-			formContainer.Add(widget.NewLabel("Este método no requiere parámetros o no se encontró el mensaje struct."))
+			formContainer.Add(widget.NewLabel("This method does not require parameters or the message struct was not found."))
 			methodSelected = true
 		}
 
@@ -435,8 +495,8 @@ func main() {
 
 	refreshLocalProtosList()
 
-	methodsContainer := widget.NewCard("MÉTODOS DETECTADOS", "", sidebarList)
-	localFilesContainer := widget.NewCard("ASSETS DISPONIBLES (.proto)", "", localProtoList)
+	methodsContainer := widget.NewCard("DETECTED METHODS", "", sidebarList)
+	localFilesContainer := widget.NewCard("AVAILABLE ASSETS (.proto)", "", localProtoList)
 
 	listsSplit := container.NewVSplit(methodsContainer, localFilesContainer)
 	listsSplit.Offset = 0.5
@@ -447,18 +507,20 @@ func main() {
 
 	sidebarWrapper := container.NewStack(sizer, sidebarBgShape, listsSplit)
 
+	actionButtons := container.NewBorder(nil, nil, nil, grpcurlBtn, sendBtn)
+
 	controlPanelContent := container.NewVBox(
 		widget.NewLabelWithStyle("gRPC Server Address:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		serverAddressContainer,
 		widget.NewSeparator(),
 		methodNameLabel,
 		widget.NewSeparator(),
-		widget.NewLabelWithStyle("Parámetros del Request:", fyne.TextAlignLeading, fyne.TextStyle{Italic: true}),
+		widget.NewLabelWithStyle("Request Parameters:", fyne.TextAlignLeading, fyne.TextStyle{Italic: true}),
 		formContainer,
 		widget.NewSeparator(),
-		sendBtn,
+		actionButtons,
 	)
-	controlCard := widget.NewCard("PANEL DE CONFIGURACIÓN", "", controlPanelContent)
+	controlCard := widget.NewCard("CONFIGURATION PANEL", "", controlPanelContent)
 
 	logsContent := container.NewVBox(
 		widget.NewLabelWithStyle("Client Request Log:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
