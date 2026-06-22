@@ -1,7 +1,3 @@
-Here is your updated, premium `README.md` incorporating the **Apache License 2.0**. I have also updated the license section to match the terms you provided.
-
----
-
 # gOKurl — gRPC Artisan Client
 
 **gOKurl** is an elegant, microservice-focused desktop GUI client designed to parse Protobuf files natively and trigger execution payloads over gRPC targets. Engineered following clean desktop patterns, it replaces terminal command hacking with a high-fidelity, artisan-tailored developer cockpit.
