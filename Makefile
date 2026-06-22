@@ -1,9 +1,12 @@
-.PHONY: help build-all build-linux build-windows build-darwin release-all clean 
+.PHONY: help build-all build-linux build-windows build-darwin release-all clean start
 
 all: help
 
 APP_ID=it.markitos.gokurl
 MACOS_SDK_PATH=/home/markitos/.sdk/MacOSX-SDKs/MacOSX13.3.sdk
+
+start:
+	go run main.go
 
 build-all:
 	fyne-cross linux -arch=amd64
@@ -36,6 +39,7 @@ clean:
 
 help:
 	@echo "Available targets:"
+	@echo "  start           - Run app from go file."
 	@echo "  all             - Builds all supported platforms (linux, windows)."
 	@echo "  build-all       - Builds all supported platforms (linux, windows)."
 	@echo "  build-linux     - Builds for Linux (amd64)."
