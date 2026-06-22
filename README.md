@@ -17,6 +17,8 @@
   <img src="capture1.png" alt="gOKurl Main Interface" width="800">
   <br><br>
   <img src="capture2.png" alt="gOKurl Execution Log" width="800">
+  <br><br>
+  <img src="capture3.png" alt="gOKurl grpcurl command export" width="800">
 </p>
 
 ---
@@ -36,12 +38,12 @@
 
 ```text
  _____________________________________________________________________
-|  MÉTODOS DETECTADOS        |  PANEL DE CONFIGURACIÓN                |
+|  DETECTED METHODS          |  CONFIGURATION PANEL                   |
 |  - service.Method1         |  [ Host: localhost:50051            ]  |
 |  - service.Method2         |                                        |
-|____________________________|  Parámetros del Request:               |
-|  ASSETS DISPONIBLES        |  [ Field A: Type                     ]  |
-|  - api.proto               |  [ Button: Enviar Request 🚀         ]  |
+|____________________________|  Request Parameters:                   |
+|  AVAILABLE ASSETS          |  [ Field A: Type                     ]  |
+|  - api.proto               |  [ Button: Send Request 🚀           ]  |
 |  - health.proto            |________________________________________|
 |                            |  Client Request Log (Monospace Slate)  |
 |                            |  [==== Loader Bar ====]                |

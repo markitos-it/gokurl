@@ -96,7 +96,7 @@ func main() {
 	w.SetFixedSize(false)
 
 	if err := os.MkdirAll(assetsDir, os.ModePerm); err != nil {
-		fmt.Println("Error creando directorio assets:", err)
+		fmt.Println("Error creating assets directory:", err)
 	}
 
 	methodListData := []ProtoMethod{}
@@ -109,7 +109,7 @@ func main() {
 	var methodSelected bool
 
 	serverAddressInput := widget.NewEntry()
-	serverAddressInput.SetPlaceHolder("Ej: localhost:50051")
+	serverAddressInput.SetPlaceHolder("E.g: localhost:50051")
 
 	inputBorderBg := canvas.NewRectangle(colorBorderRed)
 	inputBorderBg.SetMinSize(fyne.Size{Width: 0, Height: 42})
@@ -530,7 +530,7 @@ func main() {
 		widget.NewLabelWithStyle("Server Response Log:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		resScroll,
 	)
-	logsCard := widget.NewCard("CONSOLAS DE SISTEMA", "", logsContent)
+	logsCard := widget.NewCard("SYSTEM CONSOLES", "", logsContent)
 
 	rightLayout := container.NewBorder(controlCard, nil, nil, nil, logsCard)
 	mainLayout := container.NewBorder(nil, nil, sidebarWrapper, nil, container.NewPadded(rightLayout))
