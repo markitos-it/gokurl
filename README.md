@@ -1,22 +1,40 @@
-# gOKurl — gRPC Artisan Client
+# gOKurl - The Artisan gRPC Client
 
-**gOKurl** is an elegant, microservice-focused desktop GUI client designed to parse Protobuf files natively and trigger execution payloads over gRPC targets. Engineered following clean desktop patterns, it replaces terminal command hacking with a high-fidelity, artisan-tailored developer cockpit.
+<p align="center">
+  <img src="https://img.shields.io/badge/Language-Go%201.24+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go Version">
+  <img src="https://img.shields.io/badge/GUI%20Framework-Fyne%20v2-29BEB0?style=for-the-badge" alt="Fyne FrameWork">
+  <img src="https://img.shields.io/badge/Engine-Native%20gRPC-0052CC?style=for-the-badge" alt="Native gRPC">
+  <img src="https://img.shields.io/badge/License-Apache%202.0-D22128?style=for-the-badge&logo=apache" alt="Apache 2.0 License">
+</p>
 
----
-
-## Key Features
-
-* 🛠️ **Native Protobuf Auto-Parsing:** Drop any `.proto` file; the app maps out all services, RPC endpoints, requests, and nested message fields instantly.
-* 🗂️ **Smart Asset Synchronization:** Automatically tracks schemas in a local `assets/` context directory. External schemas opened from other workspaces are cached dynamically for rapid persistence next time you boot the tool.
-* 📐 **Bento-Inspired Visual Hierarchy:** Segregated layout grouping endpoints on the left, input generation forms in the center, and standalone stream panels on the bottom.
-* 🚦 **Isolated Log Telemetry:** Dedicated, high-contrast twin consoles separating the outgoing **Client Request Log** from the inbound **Server Response Log**.
-* 🛡️ **Real-Time Input Validation:** Structural field assertions and visual safeguards that lock down execution pathways until valid endpoints are present.
+**gOKurl** is an elegant, zero-dependency desktop GUI client tailored for interacting with gRPC microservices. Engineered with a focus on software craftsmanship, it abandons external terminal binaries in favor of a 100% pure Go implementation. It parses Protobuf schemas in memory, establishes direct dynamic RPC channels, and delivers structural telemetry through a high-contrast, bento-inspired cockpit.
 
 ---
 
-## Architectural Breakdown
+## Visual Overview
 
-```
+<p align="center">
+  <img src="capture1.png" alt="gOKurl Main Interface" width="800">
+  <br><br>
+  <img src="capture2.png" alt="gOKurl Execution Log" width="800">
+</p>
+
+---
+
+## Architecture Highlights
+
+* 🚀 **Zero-Dependency Engine:** Fully autonomous. It leverages `bufbuild/protocompile` and `dynamicpb` for native in-memory reflection. No `grpcurl` or external toolchains are required on the host machine.
+* 🧬 **Recursive Payload Normalization:** Advanced JSON interception. If your microservices embed stringified JSON payloads inside generic fields like `payload`, `data`, or `body`, gOKurl recursively unpacks and pretty-prints them into a unified, highly readable tree.
+* ⚡ **Asynchronous Fluidity:** Network calls are decoupled into background goroutines with visual infinite loaders, ensuring the UI remains buttery smooth and responsive even during high-latency server cold starts.
+* 🎨 **Dynamic Telemetry Styling:** The system console dynamically mutates its background color using custom RGBA algorithms upon successful requests, providing immediate, satisfying visual feedback.
+* 🗂️ **Smart Asset Synchronization:** Automatically tracks and caches `.proto` schemas in a local `assets/` directory for rapid persistence across sessions.
+* 🛡️ **Standard Google Imports:** Natively resolves standard Google Protobuf types like `Timestamp` or `Empty` out-of-the-box via `WithStandardImports` injection.
+
+---
+
+## Interface Topology
+
+```text
  _____________________________________________________________________
 |  MÉTODOS DETECTADOS        |  PANEL DE CONFIGURACIÓN                |
 |  - service.Method1         |  [ Host: localhost:50051            ]  |
@@ -26,7 +44,8 @@
 |  - api.proto               |  [ Button: Enviar Request 🚀         ]  |
 |  - health.proto            |________________________________________|
 |                            |  Client Request Log (Monospace Slate)  |
-|                            |  Server Response Log (Monospace Slate) |
+|                            |  [==== Loader Bar ====]                |
+|                            |  Server Response Log (Dynamic Tint)    |
 |____________________________|________________________________________|
 
 ```
@@ -37,69 +56,57 @@
 
 ### Prerequisites
 
-Your host workstation must have `grpcurl` available in its system PATH to bridge network payloads:
+Since gOKurl is a self-contained binary, you only need the Go toolchain to build it from the source.
 
+### Local Development
+
+1. Clone the repository and navigate into the workspace:
 ```bash
-# Mac (Homebrew)
-brew install grpcurl
-
-# Linux (Ubuntu/Debian)
-sudo apt install grpcurl
-
-```
-
-### Installation & Run
-
-1. Clone the repository and navigate into the workspace directory:
-```bash
-
-```
-
-
-
-git clone https://github.com/your-username/gokurl.git
+git clone [https://github.com/your-username/gokurl.git](https://github.com/your-username/gokurl.git)
 cd gokurl
 
 ```
-2. Build and run the binary natively using the standard Go toolchain:
-   ```bash
+
+
+2. Download dependencies and run the application:
+```bash
+go mod tidy
 go run main.go
 
 ```
 
+
+
 ---
 
-## Cross-Platform Engineering
+## Production Packaging
 
-This project utilizes a structured `Makefile` and `fyne-cross` within an isolated containerized infrastructure to guarantee artifact consistency across target families.
+This project is configured to be cross-compiled natively using `fyne-cross` via Docker, avoiding local CGO/C++ compiler pollution.
 
-### Compiling Natively via Docker Toolchains
+To generate distribution-ready binaries for Linux, Windows, and macOS:
 
 ```bash
-# Compile and output development artifacts for standard distributions
-make build-all
-
-# Build clean production distribution bundles (Linux, Windows GUI, macOS .app)
+# Requires fyne-cross installed: go install [github.com/fyne-io/fyne-cross@latest](https://github.com/fyne-io/fyne-cross@latest)
 make release-all
 
 ```
 
-> ⚠️ **Note:** To ensure correct rendering of taskbar elements during distribution compiling, make sure an `Icon.png` file exists in the root workspace directory before calling the production release routines.
+*Note: Ensure an `Icon.png` file exists in the root directory before running the release command to embed the application icon into the OS packages.*
 
 ---
 
 ## License
 
-This project is licensed under the **Apache License, Version 2.0**. You may freely use, modify, and distribute this software under the terms outlined in the license file.
+This software is distributed under the **Apache License, Version 2.0**.
 
-```
-Copyright 2026 Markitos
+```text
+Copyright 2026 MDK | Markitos DevSecOps Kulture
 
-Licensed under the Apache License, Version 2.0 (the "License");
+Licensed under the Apache License, Version 2.0;
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+    [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0)
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -110,21 +117,3 @@ limitations under the License.
 ```
 
 ---
-
----
-
-## Deep Dive: Open Source Licensing Integrity
-
-Choosing the **Apache License 2.0** brings essential compliance characteristics to a desktop tool compiling cross-platform binaries:
-
-### Structural Patent Protection
-
-Unlike more permissive licenses like MIT, Apache 2.0 includes an explicit grant of patent rights from contributors to users. If anyone contributes code to your project that relies on a patent they own, they automatically grant you and your downstream users a royalty-free license to use it. Furthermore, it contains a defensive **patent retaliation clause**: if a user brings a patent lawsuit against you claiming your app infringes their IP, their license to this software terminates immediately.
-
-### Modification Transparency
-
-Section 4(b) explicitly requires that if you modify any files under this codebase, you must carry prominent notices indicating that the files have been altered. This guarantees downstream provenance tracking, protecting your original architectural footprint while allowing forks to innovate in the clear.
-
-### Trademark Preservation
-
-The Apache 2.0 license grants permissions for source code and compiled binaries but strictly excludes trade names and trademarks. This ensures that while developers can fork and adapt your runtime engine under compliance, they cannot use the identity or name of the tool to masquerade commercial ecosystem solutions without written permission.

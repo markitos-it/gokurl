@@ -2,15 +2,17 @@ package main
 
 import (
 	"bufio"
-	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"image/color"
 	"io"
+	"math/rand"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -20,6 +22,13 @@ import (
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	"github.com/bufbuild/protocompile"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/dynamicpb"
 )
 
 type ProtoMethod struct {
@@ -40,26 +49,23 @@ type ProtoMessage struct {
 
 const assetsDir = "assets"
 
-// --- PALETA DE COLORES ARTESANALES ---
 var (
-	colorWhiteBg   = color.RGBA{R: 255, G: 255, B: 255, A: 255} // Fondo blanco para el panel principal
-	colorSidebarBg = color.RGBA{R: 240, G: 242, B: 245, A: 255} // Gris claro suave para el Sidebar
-	colorConsoleBg = color.RGBA{R: 248, G: 249, B: 250, A: 255} // Gris sutil/hueso para los textareas
-	colorTextBlack = color.RGBA{R: 18, G: 18, B: 18, A: 255}    // Negro puro para el texto de logs
-	colorBorderRed = color.RGBA{R: 220, G: 53, B: 69, A: 255}   // Rojo para la alerta del servidor
+	colorWhiteBg   = color.RGBA{R: 255, G: 255, B: 255, A: 255}
+	colorSidebarBg = color.RGBA{R: 240, G: 242, B: 245, A: 255}
+	colorConsoleBg = color.RGBA{R: 248, G: 249, B: 250, A: 255}
+	colorTextBlack = color.RGBA{R: 18, G: 18, B: 18, A: 255}
+	colorBorderRed = color.RGBA{R: 220, G: 53, B: 69, A: 255}
 )
 
-// --- TEMA PERSONALIZADO OPTIMIZADO ---
 type ArtisanLightTheme struct{}
 
 func (m *ArtisanLightTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
 	switch name {
 	case theme.ColorNameBackground:
-		return colorWhiteBg // Fondo general de ventanas
+		return colorWhiteBg
 	case theme.ColorNameInputBackground:
-		return colorWhiteBg // Cajas de texto estándar en blanco
+		return colorWhiteBg
 	case theme.ColorNameDisabled:
-		// Corrección: Mapeamos la constante nativa correcta para forzar el texto negro en los logs
 		return colorTextBlack
 	default:
 		return theme.DefaultTheme().Color(name, theme.VariantLight)
@@ -93,7 +99,6 @@ func main() {
 		fmt.Println("Error creando directorio assets:", err)
 	}
 
-	// --- ESTADO DE LA APLICACIÓN ---
 	methodListData := []ProtoMethod{}
 	messagesRegistry := make(map[string]ProtoMessage)
 	formFields := make(map[string]*widget.Entry)
@@ -103,7 +108,6 @@ func main() {
 	var selectedMethod ProtoMethod
 	var methodSelected bool
 
-	// --- COMPONENTES UI (LADO DERECHO) ---
 	serverAddressInput := widget.NewEntry()
 	serverAddressInput.SetPlaceHolder("Ej: localhost:50051")
 
@@ -117,7 +121,6 @@ func main() {
 	methodNameLabel := widget.NewLabelWithStyle("Selecciona un método", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	formContainer := container.NewVBox()
 
-	// --- TERMINAL 1: CLIENT REQUEST LOG (FONDO GRIS CLARO, TEXTO NEGRO) ---
 	requestOutput := widget.NewMultiLineEntry()
 	requestOutput.TextStyle = fyne.TextStyle{Monospace: true}
 	requestOutput.SetText("El payload JSON saliente se estructurará aquí...")
@@ -127,17 +130,17 @@ func main() {
 	reqScroll := container.NewScroll(container.NewStack(reqTerminalBg, container.NewPadded(requestOutput)))
 	reqScroll.SetMinSize(fyne.Size{Width: 0, Height: 120})
 
-	// --- TERMINAL 2: SERVER RESPONSE LOG (FONDO GRIS CLARO, TEXTO NEGRO) ---
 	responseOutput := widget.NewMultiLineEntry()
 	responseOutput.TextStyle = fyne.TextStyle{Monospace: true}
 	responseOutput.SetText("La respuesta del servidor remoto aparecerá aquí...")
-	responseOutput.Disable()
 
 	resTerminalBg := canvas.NewRectangle(colorConsoleBg)
 	resScroll := container.NewScroll(container.NewStack(resTerminalBg, container.NewPadded(responseOutput)))
 	resScroll.SetMinSize(fyne.Size{Width: 0, Height: 180})
 
-	// --- BOTÓN DE ENVÍO GRPC ---
+	loaderBar := widget.NewProgressBarInfinite()
+	loaderBar.Hide()
+
 	sendBtn := widget.NewButtonWithIcon("Enviar Request", theme.ConfirmIcon(), nil)
 	sendBtn.Importance = widget.HighImportance
 	sendBtn.Disable()
@@ -161,6 +164,10 @@ func main() {
 	}
 
 	sendBtn.OnTapped = func() {
+		sendBtn.Disable()
+		loaderBar.Show()
+		loaderBar.Start()
+
 		address := serverAddressInput.Text
 		payloadItems := []string{}
 		for fieldName, entry := range formFields {
@@ -176,44 +183,109 @@ func main() {
 		reqLog.WriteString(fmt.Sprintf("📦 [JSON]:   %s", jsonPayload))
 		requestOutput.SetText(reqLog.String())
 
-		responseOutput.SetText("⌛ Esperando respuesta del flujo gRPC remoto...")
+		responseOutput.SetText("⌛ Connecting via native Go gRPC channel...")
 
-		protoDir := filepath.Dir(currentProtoPath)
-		protoFile := filepath.Base(currentProtoPath)
+		go func() {
+			defer func() {
+				loaderBar.Stop()
+				loaderBar.Hide()
+				validateForm()
+			}()
 
-		args := []string{
-			"-plaintext",
-			"-import-path", protoDir,
-			"-proto", protoFile,
-			"-d", jsonPayload,
-			address,
-			methodSymbol,
-		}
+			importPath := filepath.Dir(currentProtoPath)
+			protoFile := filepath.Base(currentProtoPath)
 
-		cmd := exec.Command("grpcurl", args...)
-		var outBuf, errBuf bytes.Buffer
-		cmd.Stdout = &outBuf
-		cmd.Stderr = &errBuf
-
-		err := cmd.Run()
-
-		var logResult strings.Builder
-		if err != nil {
-			logResult.WriteString("❌ [gRPC ERROR]:\n")
-			if errBuf.Len() > 0 {
-				logResult.WriteString(errBuf.String())
-			} else {
-				logResult.WriteString(err.Error())
+			compiler := protocompile.Compiler{
+				Resolver: protocompile.WithStandardImports(&protocompile.SourceResolver{
+					ImportPaths: []string{importPath},
+				}),
 			}
-		} else {
-			logResult.WriteString("🟢 [RESPONSE JSON]:\n")
-			logResult.WriteString(outBuf.String())
-		}
 
-		responseOutput.SetText(logResult.String())
+			ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+			defer cancel()
+
+			files, err := compiler.Compile(ctx, protoFile)
+			if err != nil {
+				responseOutput.SetText(fmt.Sprintf("❌ [PROTO PARSE ERROR]: %v", err))
+				return
+			}
+
+			var targetMethod protoreflect.MethodDescriptor
+			parts := strings.Split(methodSymbol, "/")
+			if len(parts) == 2 {
+				fullServiceName := protoreflect.FullName(parts[0])
+				methodName := protoreflect.Name(parts[1])
+
+				for _, fileDesc := range files {
+					services := fileDesc.Services()
+					for i := 0; i < services.Len(); i++ {
+						serviceDesc := services.Get(i)
+						if serviceDesc.FullName() == fullServiceName {
+							targetMethod = serviceDesc.Methods().ByName(methodName)
+							break
+						}
+					}
+				}
+			}
+
+			if targetMethod == nil {
+				responseOutput.SetText("❌ [ERROR]: Could not find method descriptor in compiled schema.")
+				return
+			}
+
+			conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			if err != nil {
+				responseOutput.SetText(fmt.Sprintf("❌ [CONNECTION ERROR]:\n%v", err))
+				return
+			}
+			defer conn.Close()
+
+			dynamicRequest := dynamicpb.NewMessage(targetMethod.Input())
+			err = protojson.Unmarshal([]byte(jsonPayload), dynamicRequest)
+			if err != nil {
+				responseOutput.SetText(fmt.Sprintf("❌ [JSON UNMARSHAL ERROR]:\n%v", err))
+				return
+			}
+
+			dynamicResponse := dynamicpb.NewMessage(targetMethod.Output())
+			responseOutput.SetText("⌛ Sending payload over native gRPC channel...")
+
+			grpcMethodPath := fmt.Sprintf("/%s/%s", targetMethod.Parent().FullName(), targetMethod.Name())
+			err = conn.Invoke(ctx, grpcMethodPath, dynamicRequest, dynamicResponse)
+
+			var logResult strings.Builder
+			if err != nil {
+				resTerminalBg.FillColor = colorConsoleBg
+				resTerminalBg.Refresh()
+				logResult.WriteString("❌ [gRPC SERVER ERROR]:\n")
+				logResult.WriteString(err.Error())
+			} else {
+				logResult.WriteString("🟢 [RESPONSE JSON]:\n")
+
+				jsonBytes, jsonErr := protojson.Marshal(dynamicResponse)
+				if jsonErr != nil {
+					resTerminalBg.FillColor = colorConsoleBg
+					resTerminalBg.Refresh()
+					logResult.WriteString(fmt.Sprintf("%v\n", dynamicResponse.String()))
+				} else {
+					prettyJSON := formatAndNormalizePayloads(jsonBytes)
+					logResult.WriteString(prettyJSON)
+
+					rand.Seed(time.Now().UnixNano())
+					resTerminalBg.FillColor = color.RGBA{
+						R: uint8(235 + rand.Intn(15)),
+						G: uint8(245 + rand.Intn(10)),
+						B: uint8(235 + rand.Intn(15)),
+						A: 255,
+					}
+					resTerminalBg.Refresh()
+				}
+			}
+
+			responseOutput.SetText(logResult.String())
+		}()
 	}
 
-	// --- COMPONENTES UI (SIDEBAR) ---
 	sidebarList := widget.NewList(
 		func() int { return len(methodListData) },
 		func() fyne.CanvasObject { return widget.NewLabel("template") },
@@ -363,22 +435,18 @@ func main() {
 
 	refreshLocalProtosList()
 
-	// Contenedores del Sidebar
 	methodsContainer := widget.NewCard("MÉTODOS DETECTADOS", "", sidebarList)
 	localFilesContainer := widget.NewCard("ASSETS DISPONIBLES (.proto)", "", localProtoList)
 
 	listsSplit := container.NewVSplit(methodsContainer, localFilesContainer)
 	listsSplit.Offset = 0.5
 
-	// --- FONDO GRIS CLARO EXCLUSIVO PARA EL SIDEBAR ---
 	sidebarBgShape := canvas.NewRectangle(colorSidebarBg)
 	sizer := canvas.NewRectangle(color.Transparent)
 	sizer.SetMinSize(fyne.Size{Width: 350, Height: 800})
 
-	// Acoplamos el fondo gris justo debajo del split de listas del sidebar
 	sidebarWrapper := container.NewStack(sizer, sidebarBgShape, listsSplit)
 
-	// --- PANEL DERECHO ---
 	controlPanelContent := container.NewVBox(
 		widget.NewLabelWithStyle("gRPC Server Address:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		serverAddressContainer,
@@ -396,6 +464,7 @@ func main() {
 		widget.NewLabelWithStyle("Client Request Log:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		reqScroll,
 		widget.NewSeparator(),
+		loaderBar,
 		widget.NewLabelWithStyle("Server Response Log:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		resScroll,
 	)
@@ -409,7 +478,6 @@ func main() {
 	w.ShowAndRun()
 }
 
-// --- PARSER PROTOBUF ---
 func parseFullProto(r io.Reader, methods *[]ProtoMethod, messages map[string]ProtoMessage) {
 	scanner := bufio.NewScanner(r)
 
@@ -490,4 +558,58 @@ func parseFullProto(r io.Reader, methods *[]ProtoMethod, messages map[string]Pro
 			}
 		}
 	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ [PROTO PARSER INTERNAL ERROR]: %v\n", err)
+	}
+}
+
+func formatAndNormalizePayloads(rawJson []byte) string {
+	var genericInterface interface{}
+	if err := json.Unmarshal(rawJson, &genericInterface); err != nil {
+		return string(rawJson)
+	}
+
+	cleanTree := jsonRecursiveParser(genericInterface)
+
+	prettyBytes, err := json.MarshalIndent(cleanTree, "", "  ")
+	if err != nil {
+		return string(rawJson)
+	}
+	return string(prettyBytes)
+}
+
+func jsonRecursiveParser(node interface{}) interface{} {
+	switch typedNode := node.(type) {
+
+	case map[string]interface{}:
+		targetFields := map[string]bool{"payload": true, "data": true, "body": true, "content": true}
+
+		for key, value := range typedNode {
+			if targetFields[key] {
+				if strValue, ok := value.(string); ok {
+					trimmed := strings.TrimSpace(strValue)
+					if (strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")) ||
+						(strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")) {
+
+						var innerInterface interface{}
+						if err := json.Unmarshal([]byte(trimmed), &innerInterface); err == nil {
+							typedNode[key] = jsonRecursiveParser(innerInterface)
+							continue
+						}
+					}
+				}
+			}
+			typedNode[key] = jsonRecursiveParser(value)
+		}
+		return typedNode
+
+	case []interface{}:
+		for i, value := range typedNode {
+			typedNode[i] = jsonRecursiveParser(value)
+		}
+		return typedNode
+	}
+
+	return node
 }
