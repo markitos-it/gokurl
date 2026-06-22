@@ -1,0 +1,94 @@
+name: Production Artifacts & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build Release Binary
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: gokurl-linux-amd64
+            asset_path: ./gokurl-linux-amd64
+          - os: windows-latest
+            artifact_name: gokurl-windows-amd64.exe
+            asset_path: .\gokurl-windows-amd64.exe
+          - os: macos-latest
+            artifact_name: gokurl-darwin-amd64
+            asset_path: ./gokurl-darwin-amd64
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go Environment
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Install Linux Dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev xorg-dev libx11-dev libxcursor-dev libxrandr-dev libinerama-dev libxi-dev libxinerama-dev libxxf86vm-dev
+
+      - name: Build Binary (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          go build -ldflags="-s -w" -o ${{ matrix.artifact_name }} main.go
+
+      - name: Build Binary (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          go build -ldflags="-s -w -H=windowsgui" -o ${{ matrix.artifact_name }} main.go
+
+      - name: Build Binary (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          go build -ldflags="-s -w" -o ${{ matrix.artifact_name }} main.go
+
+      - name: Upload Artifact to Workflow
+        uses: actions/abstract-artifacts@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.asset_path }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Requisito crítico para que el token pueda escribir la release
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Organize Artifacts Structure
+        run: |
+          mkdir dist
+          find ./artifacts -type f -exec cp {} ./dist/ \;
+          echo "Contenido listo para publicar en la Release:"
+          ls -l ./dist/
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./dist/*
+          name: Release ${{ github.ref_name }}
+          tag_name: ${{ github.ref }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
